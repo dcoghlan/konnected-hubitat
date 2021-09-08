@@ -86,6 +86,18 @@ def initialize() {
   if (app.label != deviceName()) { app.updateLabel(deviceName()) }
   childDeviceConfiguration()
   updateSettingsOnDevice()
+  if(logEnable) runIn(3600, logsOff)
+}
+
+def logsOff() {
+    log.info "${app.label} - Debug logging auto disabled"
+    app?.updateSetting("logEnable",[value:"false",type:"bool"])
+}
+
+def debugLog(msg) {
+    if (logEnable) {
+        log.debug(msg)
+    }
 }
 
 def deviceName() {
@@ -130,6 +142,7 @@ def pageWelcome() {
         url:         "https://help.konnected.io"
       )
       paragraph "Konnected Service Manager v${version()}"
+      input "logEnable", "bool", title: "Enable Debug Logging", description: "Enable logging for debugging.", defaultValue:false
     }
   }
 }
@@ -256,7 +269,7 @@ def discoverySubscription() {
 // Device Discovery : Handle search response
 def discoverySearchHandler(evt) {
   def event = parseLanMessage(evt.description)
-  log.debug event
+  debugLog event
   event << ["hub":evt?.hubId]
   String ssdpUSN = event.ssdpUSN.toString()
   def chipId = (ssdpUSN =~ /([0-9a-f]{12})::/)[0][1]
@@ -264,10 +277,10 @@ def discoverySearchHandler(evt) {
   if (device?.ssdpUSN == ssdpUSN) {
     device.networkAddress = event.networkAddress
     device.deviceAddress = event.deviceAddress
-    log.debug "Refreshed attributes of device $device"
+    debugLog("Refreshed attributes of device $device")
   } else if (device == null && parent.isNewDevice(chipId)) {
     state.device = event
-    log.debug "Discovered new device $event"
+    log.info "Discovered new device $event"
     unsubscribe()
     discoveryVerify(event)
   }
@@ -275,7 +288,7 @@ def discoverySearchHandler(evt) {
 
 // Device Discovery : Verify a Device
 def discoveryVerify(Map device) {
-  log.debug "Verifying communication with device $device"
+  debugLog("Verifying communication with device $device")
   String host = getDeviceIpAndPort(device)
   sendHubCommand(
     new hubitat.device.HubAction(
@@ -292,7 +305,7 @@ def discoveryVerificationHandler(hubitat.device.HubResponse hubResponse) {
   def body = hubResponse.xml
   def device = state.device
   if (device?.ssdpUSN.contains(body?.device?.UDN?.text())) {
-    log.debug "Verification Success: $body"
+    debugLog("Verification Success: $body")
     device.name =  body?.device?.roomName?.text()
     device.model = body?.device?.modelName?.text()
     device.serialNumber = body?.device?.serialNumber?.text().replaceAll('0x','').padLeft(12,'0')
@@ -341,7 +354,7 @@ def childDeviceConfiguration() {
   }
 
   deleteChildDevices.each {
-    log.debug "Deleting device $it.deviceNetworkId"
+    debugLog("Deleting device $it.deviceNetworkId")
     deleteChildDevice(it.deviceNetworkId)
   }
 }
@@ -355,17 +368,17 @@ def childDeviceStateUpdate() {
   def device = getChildDevice(deviceId)
   if (device) {
     if (request.JSON?.temp) {
-      log.debug "Temp: $request.JSON"
+      debugLog("Temp: $request.JSON")
       device.updateStates(request.JSON)
     } else {
       def newState = params.deviceState ?: request.JSON.state.toString()
-      log.debug "Received sensor update from Konnected device: $deviceId = $newState"
+      debugLog("Received sensor update from Konnected device: $deviceId = $newState")
       device.setStatus(newState)
     }
   } else {
     if (addr) {
       // New device found at this address, create it
-      log.debug "Adding new thing attached to Konnected: $deviceId"
+      debugLog("Adding new thing attached to Konnected: $deviceId")
       device = addChildDevice("konnected-io", settings."deviceType_$zone", deviceId, state.device.hub, [ "label": addr , "completedSetup": true ])
       device.updateStates(request.JSON)
     } else {
@@ -418,12 +431,12 @@ def updateSettingsOnDevice() {
     }
   }
 
-  log.debug "Configured sensors on $chipId: $sensors"
-  log.debug "Configured actuators on $chipId: $actuators"
-  log.debug "Configured DHT sensors on $chipId: $dht_sensors"
-  log.debug "Configured DS18B20 sensors on $chipId: $ds18b20_sensors"
+  debugLog("Configured sensors on $chipId: $sensors")
+  debugLog("Configured actuators on $chipId: $actuators")
+  debugLog("Configured DHT sensors on $chipId: $dht_sensors")
+  debugLog("Configured DS18B20 sensors on $chipId: $ds18b20_sensors")
 
-  log.debug "Blink is: ${settings.blink}"
+  debugLog("Blink is: ${settings.blink}")
   def body = [
     token : state.accessToken,
     apiUrl : getFullLocalApiServerUrl(),
@@ -435,7 +448,7 @@ def updateSettingsOnDevice() {
     ds18b20_sensors : ds18b20_sensors
   ]
 
-  log.debug "Updating settings on device $chipId at $ip"
+  debugLog("Updating settings on device $chipId at $ip")
   sendHubCommand(new hubitat.device.HubAction([
     method: "PUT",
     path: "/settings",
@@ -452,7 +465,7 @@ def deviceUpdateDeviceState(deviceDNI, deviceState, Map actuatorOptions = [:]) {
   def device = state.device
 
   if (device && device.serialNumber == chipId) {
-    log.debug "Updating device $chipId zone $deviceId to $deviceState at " + getDeviceIpAndPort(device)
+    debugLog("Updating device $chipId zone $deviceId to $deviceState at " + getDeviceIpAndPort(device))
     sendHubCommand(new hubitat.device.HubAction([
       method: "PUT",
       path: "/zone",
